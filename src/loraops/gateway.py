@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+from collections import OrderedDict
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Response
@@ -53,9 +54,13 @@ class TenantRef(BaseModel):
 
 
 class Gateway:
-    def __init__(self, cfg: PipelineConfig, client: httpx.AsyncClient):
+    def __init__(self, cfg: PipelineConfig, client: httpx.AsyncClient, cache_size: int = 1024):
         self.cfg = cfg
         self.client = client
+        # temperature=0 is deterministic, so identical (model, text) can be answered from memory.
+        # The key includes the adapter name, so promote / rollback never serves a stale answer.
+        self._cache: OrderedDict[tuple[str, str], str] = OrderedDict()
+        self._cache_size = cache_size
         self.registry = Registry(cfg.registry.root)
         self.tenants: dict[str, TenantConfig] = {t.name: t for t in list_tenants(cfg)}
         self.active: dict[str, str] = {}  # tenant -> version currently routable
@@ -64,10 +69,10 @@ class Gateway:
     async def sync(self) -> dict:
         async with self._lock:
             desired = {}
+            registry_tenants = self.registry.tenants()  # one index.json read, not one per tenant
             for name in self.tenants:
-                prod = self.registry.production(name)
-                if prod:
-                    v = prod[0]
+                v = registry_tenants.get(name, {}).get("production")
+                if v:
                     desired[adapter_name(name, v)] = (name, v)
             r = await self.client.get("/v1/models")
             r.raise_for_status()
@@ -105,17 +110,26 @@ class Gateway:
         version = self.active.get(tenant.name)
         model = adapter_name(tenant.name, version) if version else self.cfg.base.model
         t0 = time.perf_counter()
-        r = await self.client.post(
-            "/v1/chat/completions",
-            json={
-                "model": model,
-                "messages": build_messages(tenant, text),
-                "temperature": 0,
-                "max_tokens": self.cfg.eval.max_new_tokens,
-            },
-        )
-        r.raise_for_status()
-        raw = r.json()["choices"][0]["message"]["content"] or ""
+        key = (model, text)
+        raw = self._cache.get(key)
+        if raw is not None:
+            self._cache.move_to_end(key)
+        else:
+            r = await self.client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": build_messages(tenant, text),
+                    "temperature": 0,
+                    "max_tokens": self.cfg.eval.max_new_tokens,
+                },
+            )
+            r.raise_for_status()
+            raw = r.json()["choices"][0]["message"]["content"] or ""
+            if self._cache_size > 0:
+                self._cache[key] = raw
+                if len(self._cache) > self._cache_size:
+                    self._cache.popitem(last=False)
         label = parse_label(raw, tenant.labels)
         latency = time.perf_counter() - t0
         LATENCY.labels(tenant.name).observe(latency)
@@ -158,7 +172,7 @@ def create_app(
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
         http = client or httpx.AsyncClient(base_url=cfg.serving.vllm_url, timeout=60)
-        app.state.gw = Gateway(cfg, http)
+        app.state.gw = Gateway(cfg, http, int(os.environ.get("LORAOPS_CACHE_SIZE", "1024")))
         task = asyncio.create_task(_loop(app.state.gw)) if interval > 0 else None
         yield
         if task:
