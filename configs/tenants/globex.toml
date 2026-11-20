@@ -1,0 +1,12 @@
+name = "globex"
+display_name = "Globex Analytics"
+description = "a B2B analytics SaaS product"
+data = "data/tenants/globex/tickets.jsonl"
+labels = ["bug_report", "feature_request", "outage", "integration", "pricing"]
+
+[label_descriptions]
+bug_report = "something works incorrectly for this user"
+feature_request = "a request for new functionality"
+outage = "the service is down or unreachable for many users"
+integration = "connecting third-party tools, APIs, webhooks, SSO"
+pricing = "plans, prices, discounts, limits, billing plan changes"

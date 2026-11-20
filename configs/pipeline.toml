@@ -1,0 +1,48 @@
+# Default pipeline config, sized for a free Colab / Kaggle T4 GPU (16 GB).
+
+tenants_dir = "configs/tenants"
+
+[base]
+# Every adapter is trained on, and served with, this exact base model.
+model = "Qwen/Qwen2.5-0.5B-Instruct"
+max_seq_len = 512
+
+[lora]
+r = 16
+alpha = 32
+dropout = 0.05
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+[train]
+epochs = 3
+learning_rate = 2e-4
+batch_size = 8
+grad_accum = 1
+load_in_4bit = true   # QLoRA on GPU; ignored on CPU
+seed = 42
+
+[data]
+test_fraction = 0.2
+min_examples_per_label = 5
+max_text_chars = 2000
+
+[eval]
+few_shot_k = 5        # the few-shot baseline the adapter must beat
+batch_size = 16
+max_new_tokens = 16
+
+[gate]
+metric = "macro_f1"
+min_test_examples = 20
+min_score = 0.6                 # absolute floor, whatever the baselines score
+min_gain_over_baseline = 0.05
+max_regression_vs_production = 0.01
+max_invalid_rate = 0.05
+auto_promote = true
+
+[registry]
+root = "registry"
+
+[serving]
+vllm_url = "http://localhost:8001"
+registry_mount = "/registry"

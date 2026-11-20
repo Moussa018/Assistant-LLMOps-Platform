@@ -1,0 +1,12 @@
+name = "acme"
+display_name = "Acme Shop"
+description = "an online retailer of clothing, electronics and home goods"
+data = "data/tenants/acme/tickets.jsonl"
+labels = ["billing", "shipping", "returns", "account", "product_question"]
+
+[label_descriptions]
+billing = "charges, invoices, payment methods, promo codes"
+shipping = "delivery status, tracking, addresses, couriers"
+returns = "returns, exchanges, refunds for returned items"
+account = "login, password, email changes, account deletion, newsletters"
+product_question = "features, sizing, compatibility and availability of products"
