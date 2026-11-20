@@ -58,13 +58,21 @@ class HFPredictor:
         else:
             ctx = self.model.disable_adapter() if self.adapters else contextlib.nullcontext()
 
+        # Batch prompts of similar length together: less padding, faster generation.
+        # Results are put back in the caller's order.
+        order = sorted(
+            range(len(conversations)),
+            key=lambda i: sum(len(m["content"]) for m in conversations[i]),
+        )
         outputs: list[str] = []
         bs = self.cfg.eval.batch_size
         with ctx, torch.inference_mode():
-            for i in range(0, len(conversations), bs):
+            for i in range(0, len(order), bs):
                 prompts = [
-                    self.tok.apply_chat_template(c, tokenize=False, add_generation_prompt=True)
-                    for c in conversations[i : i + bs]
+                    self.tok.apply_chat_template(
+                        conversations[j], tokenize=False, add_generation_prompt=True
+                    )
+                    for j in order[i : i + bs]
                 ]
                 enc = self.tok(prompts, return_tensors="pt", padding=True, add_special_tokens=False)
                 enc = {k: v.to(self.model.device) for k, v in enc.items()}
@@ -76,7 +84,10 @@ class HFPredictor:
                 )
                 new = gen[:, enc["input_ids"].shape[1] :]
                 outputs += self.tok.batch_decode(new, skip_special_tokens=True)
-        return outputs
+        restored = [""] * len(outputs)
+        for pos, j in enumerate(order):
+            restored[j] = outputs[pos]
+        return restored
 
     def close(self) -> None:
         import torch
