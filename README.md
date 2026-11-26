@@ -1,4 +1,4 @@
-# loraops
+# Loraops
 
 **A pipeline that fine-tunes one LoRA adapter per customer, proves each one is worth shipping,
 and serves all of them from a single base model on one GPU.**
